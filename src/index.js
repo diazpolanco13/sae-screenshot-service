@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer-core');
+const { execSync } = require('child_process');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -14,8 +16,41 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
 // Token secreto para acceder a SAE-RADAR sin login
 const SCREENSHOT_TOKEN = process.env.SCREENSHOT_TOKEN || 'sae-screenshot-secret-2025';
 
-// Ruta del ejecutable de Chromium
-const CHROMIUM_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+// Buscar Chromium en múltiples ubicaciones
+function findChromium() {
+  const possiblePaths = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/app/.nix-profile/bin/chromium',
+    '/nix/var/nix/profiles/default/bin/chromium',
+  ];
+  
+  for (const p of possiblePaths) {
+    if (p && fs.existsSync(p)) {
+      console.log(`✅ Chromium encontrado en: ${p}`);
+      return p;
+    }
+  }
+  
+  // Intentar encontrarlo con which
+  try {
+    const path = execSync('which chromium || which chromium-browser || which google-chrome', { encoding: 'utf8' }).trim();
+    if (path && fs.existsSync(path)) {
+      console.log(`✅ Chromium encontrado via which: ${path}`);
+      return path;
+    }
+  } catch (e) {
+    // Ignorar errores de which
+  }
+  
+  console.error('❌ Chromium no encontrado en ninguna ubicación conocida');
+  return null;
+}
+
+const CHROMIUM_PATH = findChromium();
 
 app.use(cors());
 app.use(express.json());
@@ -23,24 +58,16 @@ app.use(express.json());
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
-    status: 'ok', 
+    status: CHROMIUM_PATH ? 'ok' : 'error', 
     service: 'sae-screenshot-service', 
-    version: '1.2.0',
-    chromium: CHROMIUM_PATH
+    version: '1.3.0',
+    chromium: CHROMIUM_PATH || 'NOT FOUND'
   });
 });
 
 /**
  * POST /screenshot
  * Genera un screenshot del mapa con un vuelo seleccionado
- * 
- * Body:
- * - flightId: ICAO24 hex del vuelo (ej: "AE5F12")
- * - callsign: Callsign del vuelo (ej: "BAT91")
- * - lat: Latitud del vuelo
- * - lon: Longitud del vuelo
- * - width: Ancho del screenshot (default: 1280)
- * - height: Alto del screenshot (default: 720)
  */
 app.post('/screenshot', async (req, res) => {
   const startTime = Date.now();
@@ -52,6 +79,10 @@ app.post('/screenshot', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     
+    if (!CHROMIUM_PATH) {
+      return res.status(500).json({ error: 'Chromium no está disponible en el servidor' });
+    }
+    
     const {
       flightId,
       callsign,
@@ -60,7 +91,7 @@ app.post('/screenshot', async (req, res) => {
       width = 1280,
       height = 720,
       zoom = 7,
-      delay = 4000 // Tiempo de espera para que cargue el mapa y vuelos
+      delay = 4000
     } = req.body;
     
     if (!flightId && !callsign) {
@@ -69,7 +100,7 @@ app.post('/screenshot', async (req, res) => {
     
     console.log(`📸 Generando screenshot para ${callsign || flightId}...`);
     
-    // Iniciar navegador headless con puppeteer-core
+    // Iniciar navegador headless
     browser = await puppeteer.launch({
       headless: 'new',
       executablePath: CHROMIUM_PATH,
@@ -79,6 +110,8 @@ app.post('/screenshot', async (req, res) => {
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
+        '--single-process',
+        '--no-zygote',
         '--window-size=1280,720'
       ]
     });
@@ -112,7 +145,7 @@ app.post('/screenshot', async (req, res) => {
       console.log('⚠️ Selector del mapa no encontrado, continuando...');
     });
     
-    // Esperar tiempo adicional para que carguen los vuelos y se seleccione
+    // Esperar tiempo adicional para que carguen los vuelos
     await new Promise(resolve => setTimeout(resolve, delay));
     
     // Verificar si el screenshot está listo
@@ -136,7 +169,6 @@ app.post('/screenshot', async (req, res) => {
     const elapsed = Date.now() - startTime;
     console.log(`✅ Screenshot generado en ${elapsed}ms`);
     
-    // Devolver imagen en base64
     res.json({
       success: true,
       image: screenshot,
@@ -163,7 +195,7 @@ app.post('/screenshot', async (req, res) => {
 
 /**
  * GET /screenshot/static
- * Genera un screenshot usando Mapbox Static Images API (alternativa más rápida)
+ * Screenshot usando Mapbox Static Images API (alternativa rápida)
  */
 app.get('/screenshot/static', async (req, res) => {
   try {
@@ -178,7 +210,6 @@ app.get('/screenshot/static', async (req, res) => {
       return res.status(500).json({ error: 'MAPBOX_TOKEN no configurado' });
     }
     
-    // Construir URL de Mapbox Static Images
     let url = `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/`;
     
     if (marker === 'true') {
@@ -187,7 +218,6 @@ app.get('/screenshot/static', async (req, res) => {
     
     url += `${lon},${lat},${zoom},0/${width}x${height}@2x?access_token=${MAPBOX_TOKEN}`;
     
-    // Redirigir a la imagen de Mapbox
     res.redirect(url);
     
   } catch (error) {
@@ -198,7 +228,7 @@ app.get('/screenshot/static', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`\n🚀 SAE Screenshot Service running on port ${PORT}`);
   console.log(`📍 SAE-RADAR URL: ${SAE_RADAR_URL}`);
-  console.log(`🌐 Chromium: ${CHROMIUM_PATH}`);
+  console.log(`🌐 Chromium: ${CHROMIUM_PATH || 'NOT FOUND'}`);
   console.log(`🔑 Screenshot Token: ${SCREENSHOT_TOKEN.substring(0, 10)}...`);
   console.log(`🔐 Auth: ${AUTH_TOKEN ? 'Enabled' : 'Disabled'}\n`);
 });
