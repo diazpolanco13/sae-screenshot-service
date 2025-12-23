@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -14,12 +14,20 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
 // Token secreto para acceder a SAE-RADAR sin login
 const SCREENSHOT_TOKEN = process.env.SCREENSHOT_TOKEN || 'sae-screenshot-secret-2025';
 
+// Ruta del ejecutable de Chromium
+const CHROMIUM_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+
 app.use(cors());
 app.use(express.json());
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'sae-screenshot-service', version: '1.1.0' });
+  res.json({ 
+    status: 'ok', 
+    service: 'sae-screenshot-service', 
+    version: '1.2.0',
+    chromium: CHROMIUM_PATH
+  });
 });
 
 /**
@@ -61,10 +69,10 @@ app.post('/screenshot', async (req, res) => {
     
     console.log(`📸 Generando screenshot para ${callsign || flightId}...`);
     
-    // Iniciar navegador headless
+    // Iniciar navegador headless con puppeteer-core
     browser = await puppeteer.launch({
       headless: 'new',
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      executablePath: CHROMIUM_PATH,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -190,6 +198,7 @@ app.get('/screenshot/static', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`\n🚀 SAE Screenshot Service running on port ${PORT}`);
   console.log(`📍 SAE-RADAR URL: ${SAE_RADAR_URL}`);
+  console.log(`🌐 Chromium: ${CHROMIUM_PATH}`);
   console.log(`🔑 Screenshot Token: ${SCREENSHOT_TOKEN.substring(0, 10)}...`);
   console.log(`🔐 Auth: ${AUTH_TOKEN ? 'Enabled' : 'Disabled'}\n`);
 });
