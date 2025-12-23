@@ -60,7 +60,7 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: CHROMIUM_PATH ? 'ok' : 'error', 
     service: 'sae-screenshot-service', 
-    version: '1.3.0',
+    version: '1.4.0',
     chromium: CHROMIUM_PATH || 'NOT FOUND'
   });
 });
@@ -68,6 +68,23 @@ app.get('/health', (req, res) => {
 /**
  * POST /screenshot
  * Genera un screenshot del mapa con un vuelo seleccionado
+ * 
+ * Parámetros:
+ * - flightId: ICAO24 del vuelo
+ * - callsign: Callsign del vuelo
+ * - lat, lon: Coordenadas
+ * - alt: Altitud en pies
+ * - speed: Velocidad en nudos
+ * - heading: Rumbo en grados
+ * - type: Tipo de aeronave (ej: "DH8B")
+ * - reg: Registro de aeronave (ej: "N986HA")
+ * - origin: Código de aeropuerto origen (ej: "POS")
+ * - dest: Código de aeropuerto destino (ej: "PUJ")
+ * - origin_name: Nombre completo del origen
+ * - dest_name: Nombre completo del destino
+ * - airline: Nombre del operador (ej: "US Air Force")
+ * - zoom: Nivel de zoom (default: 5)
+ * - delay: Tiempo de espera en ms (default: 8000)
  */
 app.post('/screenshot', async (req, res) => {
   const startTime = Date.now();
@@ -88,10 +105,20 @@ app.post('/screenshot', async (req, res) => {
       callsign,
       lat,
       lon,
+      alt,
+      speed,
+      heading,
+      type,
+      reg,
+      origin,
+      dest,
+      origin_name,
+      dest_name,
+      airline,
       width = 1280,
       height = 720,
-      zoom = 7,
-      delay = 4000
+      zoom = 5,
+      delay = 8000
     } = req.body;
     
     if (!flightId && !callsign) {
@@ -99,6 +126,9 @@ app.post('/screenshot', async (req, res) => {
     }
     
     console.log(`📸 Generando screenshot para ${callsign || flightId}...`);
+    console.log(`📍 Pos: ${lat}, ${lon} | Alt: ${alt} ft | Heading: ${heading}°`);
+    console.log(`✈️ Tipo: ${type} | Reg: ${reg} | Operador: ${airline || 'N/A'}`);
+    console.log(`🛫 Ruta: ${origin || '???'} → ${dest || '???'}`);
     
     // Iniciar navegador headless
     browser = await puppeteer.launch({
@@ -119,41 +149,59 @@ app.post('/screenshot', async (req, res) => {
     const page = await browser.newPage();
     await page.setViewport({ width: parseInt(width), height: parseInt(height) });
     
-    // Construir URL con parámetros para modo screenshot
+    // Construir URL con TODOS los parámetros para modo screenshot
     const params = new URLSearchParams();
     params.set('screenshot', 'true');
     params.set('screenshot_token', SCREENSHOT_TOKEN);
+    
+    // Identificación del vuelo
     if (flightId) params.set('flight', flightId);
     if (callsign) params.set('callsign', callsign);
-    if (lat && lon) {
-      params.set('lat', lat);
-      params.set('lon', lon);
-      params.set('zoom', zoom);
-    }
+    
+    // Posición y movimiento
+    if (lat) params.set('lat', lat.toString());
+    if (lon) params.set('lon', lon.toString());
+    if (alt) params.set('alt', alt.toString());
+    if (speed) params.set('speed', speed.toString());
+    if (heading !== undefined && heading !== null) params.set('heading', heading.toString());
+    params.set('zoom', zoom.toString());
+    
+    // Datos de la aeronave
+    if (type) params.set('type', type);
+    if (reg) params.set('reg', reg);
+    
+    // Ruta de vuelo
+    if (origin) params.set('origin', origin);
+    if (dest) params.set('dest', dest);
+    if (origin_name) params.set('origin_name', origin_name);
+    if (dest_name) params.set('dest_name', dest_name);
+    
+    // Operador/Aerolínea
+    if (airline) params.set('airline', airline);
     
     const url = `${SAE_RADAR_URL}?${params.toString()}`;
-    console.log(`🌐 Navegando a: ${url}`);
+    console.log(`🌐 Navegando a: ${url.substring(0, 150)}...`);
     
     // Navegar a la página
     await page.goto(url, { 
       waitUntil: 'networkidle2',
-      timeout: 30000 
+      timeout: 60000 
     });
     
     // Esperar a que el mapa cargue
-    await page.waitForSelector('.mapboxgl-map', { timeout: 15000 }).catch(() => {
+    await page.waitForSelector('.mapboxgl-map', { timeout: 20000 }).catch(() => {
       console.log('⚠️ Selector del mapa no encontrado, continuando...');
     });
     
-    // Esperar tiempo adicional para que carguen los vuelos
+    // Esperar tiempo adicional para que carguen los tiles y el vuelo
     await new Promise(resolve => setTimeout(resolve, delay));
     
     // Verificar si el screenshot está listo
     const isReady = await page.evaluate(() => window.screenshotReady === true);
     if (isReady) {
-      console.log('✅ Vuelo encontrado y seleccionado');
+      console.log('✅ Mapa cargado y listo');
     } else {
-      console.log('⚠️ Vuelo no encontrado, capturando de todos modos');
+      console.log('⚠️ Mapa posiblemente no completó la carga, capturando de todos modos');
     }
     
     // Tomar screenshot
@@ -226,7 +274,7 @@ app.get('/screenshot/static', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n🚀 SAE Screenshot Service running on port ${PORT}`);
+  console.log(`\n🚀 SAE Screenshot Service v1.4.0 running on port ${PORT}`);
   console.log(`📍 SAE-RADAR URL: ${SAE_RADAR_URL}`);
   console.log(`🌐 Chromium: ${CHROMIUM_PATH || 'NOT FOUND'}`);
   console.log(`🔑 Screenshot Token: ${SCREENSHOT_TOKEN.substring(0, 10)}...`);
