@@ -1,9 +1,10 @@
 FROM node:18-slim
 
-# Instalar dependencias de Chromium
+# Instalar Chromium y dependencias
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
+    fonts-noto-color-emoji \
     libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -21,20 +22,22 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     xdg-utils \
     --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
-
-# Configurar Puppeteer para usar Chromium del sistema
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 WORKDIR /app
 
-# Copiar package.json primero para cachear dependencias
-COPY package*.json ./
-RUN npm ci --only=production
+# Copiar package.json
+COPY package.json ./
+
+# Instalar dependencias (puppeteer-core no descarga Chromium)
+RUN npm install --omit=dev
 
 # Copiar código fuente
 COPY src ./src
+
+# Configurar ruta de Chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Puerto por defecto
 EXPOSE 3001
