@@ -8,15 +8,18 @@ const PORT = process.env.PORT || 3001;
 // URL de la aplicación SAE-RADAR
 const SAE_RADAR_URL = process.env.SAE_RADAR_URL || 'http://localhost:5173';
 
-// Token de autenticación (opcional)
+// Token de autenticación para el servicio
 const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
+
+// Token secreto para acceder a SAE-RADAR sin login
+const SCREENSHOT_TOKEN = process.env.SCREENSHOT_TOKEN || 'sae-screenshot-secret-2025';
 
 app.use(cors());
 app.use(express.json());
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'sae-screenshot-service', version: '1.0.0' });
+  res.json({ status: 'ok', service: 'sae-screenshot-service', version: '1.1.0' });
 });
 
 /**
@@ -48,8 +51,8 @@ app.post('/screenshot', async (req, res) => {
       lon,
       width = 1280,
       height = 720,
-      zoom = 8,
-      delay = 3000 // Tiempo de espera para que cargue el mapa
+      zoom = 7,
+      delay = 4000 // Tiempo de espera para que cargue el mapa y vuelos
     } = req.body;
     
     if (!flightId && !callsign) {
@@ -75,8 +78,10 @@ app.post('/screenshot', async (req, res) => {
     const page = await browser.newPage();
     await page.setViewport({ width: parseInt(width), height: parseInt(height) });
     
-    // Construir URL con parámetros para pre-seleccionar el vuelo
+    // Construir URL con parámetros para modo screenshot
     const params = new URLSearchParams();
+    params.set('screenshot', 'true');
+    params.set('screenshot_token', SCREENSHOT_TOKEN);
     if (flightId) params.set('flight', flightId);
     if (callsign) params.set('callsign', callsign);
     if (lat && lon) {
@@ -84,7 +89,6 @@ app.post('/screenshot', async (req, res) => {
       params.set('lon', lon);
       params.set('zoom', zoom);
     }
-    params.set('screenshot', 'true'); // Flag para modo screenshot
     
     const url = `${SAE_RADAR_URL}?${params.toString()}`;
     console.log(`🌐 Navegando a: ${url}`);
@@ -100,23 +104,15 @@ app.post('/screenshot', async (req, res) => {
       console.log('⚠️ Selector del mapa no encontrado, continuando...');
     });
     
-    // Esperar tiempo adicional para que carguen los vuelos
+    // Esperar tiempo adicional para que carguen los vuelos y se seleccione
     await new Promise(resolve => setTimeout(resolve, delay));
     
-    // Si hay callsign, intentar hacer clic en el avión
-    if (callsign || flightId) {
-      try {
-        // Buscar y hacer clic en el marcador del vuelo
-        const flightSelector = `[data-flight-id="${flightId}"], [data-callsign="${callsign}"]`;
-        await page.click(flightSelector).catch(() => {
-          console.log('⚠️ No se pudo hacer clic en el marcador del vuelo');
-        });
-        
-        // Esperar a que aparezca el panel de detalles
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (e) {
-        console.log('⚠️ Error seleccionando vuelo:', e.message);
-      }
+    // Verificar si el screenshot está listo
+    const isReady = await page.evaluate(() => window.screenshotReady === true);
+    if (isReady) {
+      console.log('✅ Vuelo encontrado y seleccionado');
+    } else {
+      console.log('⚠️ Vuelo no encontrado, capturando de todos modos');
     }
     
     // Tomar screenshot
@@ -138,7 +134,8 @@ app.post('/screenshot', async (req, res) => {
       image: screenshot,
       contentType: 'image/png',
       elapsed: elapsed,
-      flight: callsign || flightId
+      flight: callsign || flightId,
+      ready: isReady
     });
     
   } catch (error) {
@@ -193,5 +190,6 @@ app.get('/screenshot/static', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`\n🚀 SAE Screenshot Service running on port ${PORT}`);
   console.log(`📍 SAE-RADAR URL: ${SAE_RADAR_URL}`);
+  console.log(`🔑 Screenshot Token: ${SCREENSHOT_TOKEN.substring(0, 10)}...`);
   console.log(`🔐 Auth: ${AUTH_TOKEN ? 'Enabled' : 'Disabled'}\n`);
 });
