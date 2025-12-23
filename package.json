@@ -1,7 +1,7 @@
 {
   "name": "sae-screenshot-service",
-  "version": "1.1.0",
-  "description": "Servicio de capturas de pantalla para alertas de incursiones aéreas SAE-RADAR",
+  "version": "1.5.0",
+  "description": "Servicio de capturas de pantalla para alertas de incursiones aéreas SAE-RADAR. Soporta screenshots de entrada y salida con trail del recorrido.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
